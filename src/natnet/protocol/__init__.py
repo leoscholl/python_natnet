@@ -23,7 +23,8 @@ __all__ = [
     'MessageId', 'Version',
     # Messages
     'ConnectMessage', 'DiscoveryMessage', 'EchoRequestMessage', 'EchoResponseMessage',
-    'MocapFrameMessage', 'ModelDefinitionsMessage', 'RequestModelDefinitionsMessage', 'ServerInfoMessage']
+    'MocapFrameMessage', 'ModelDefinitionsMessage', 'RequestModelDefinitionsMessage', 
+    'ServerInfoMessage', 'RequestMessage', 'ResponseMessage']
 
 from .common import (MessageId, Version, deserialize, deserialize_header, deserialize_payload,
                      serialize, set_version)
@@ -35,3 +36,5 @@ from .MocapFrameMessage import MocapFrameMessage
 from .ModelDefinitionsMessage import ModelDefinitionsMessage
 from .RequestModelDefinitionsMessage import RequestModelDefinitionsMessage
 from .ServerInfoMessage import ServerInfoMessage
+from .RequestMessage import RequestMessage
+from .ResponseMessage import ResponseMessage

@@ -561,6 +561,21 @@ class Client(object):
 
         self._call_model_callback()
 
+    def _handle_response(self, response_message, received_time):
+        self._log.info('Received response: ' + response_message.response)
+
+    def set_session(self, session_name):
+        self._conn.send_packet(protocol.serialize(
+                protocol.RequestMessage("SetCurrentSession," + session_name)))
+
+    def start_recording(self):
+        self._conn.send_packet(protocol.serialize(
+                protocol.RequestMessage("StartRecording")))
+
+    def stop_recording(self):
+        self._conn.send_packet(protocol.serialize(
+                protocol.RequestMessage("StopRecording")))
+
     def run_once(self, timeout=None):
         """Receive and process one message."""
         message_id, payload, received_time = self._conn.wait_for_packet(timeout)
@@ -577,6 +592,9 @@ class Client(object):
         elif message_id == protocol.MessageId.EchoResponse:
             echo_response_message = protocol.deserialize_payload(message_id, payload)
             self._clock_synchronizer.handle_echo_response(echo_response_message, received_time)
+        elif message_id == protocol.MessageId.Response:
+            response_message = protocol.deserialize_payload(message_id, payload)
+            self._handle_response(response_message, received_time)
         else:
             self._log.error('Unhandled message type:', message_id.name)
         self._clock_synchronizer.update(self._conn)
