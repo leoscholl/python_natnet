@@ -14,12 +14,12 @@ class ResponseMessage(object):
 
     @classmethod
     def deserialize(cls, data, version):
-        """Deserialize an Request message.
+        """Deserialize an Response message.
 
         :type data: ParseBuffer
         :type version: Version"""
 
-        response = data.unpack_cstr(256)
+        response = data.unpack_cstr()
         return cls(response)
 
     def serialize(self, version=None):

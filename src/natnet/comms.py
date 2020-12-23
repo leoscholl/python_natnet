@@ -562,30 +562,34 @@ class Client(object):
 
     def _handle_response(self, response_message, received_time):
         self._log.info('Received response: ' + response_message.response)
+        if response_message.response == "":
+            return True
+        else:
+            return response_message.response
 
-    def _send_message_and_wait(self, message, timeout=0.02, tries=10):
+    def _send_command_and_wait(self, command, timeout=0.02, tries=10):
         for t in range(tries):
-            self._conn.send_message(protocol.RequestMessage(message))
+            self._conn.send_message(protocol.RequestMessage(command))
             response, received_time = self._conn.wait_for_message_with_id(
-                protocol.MessageId.ResponseMessage, timeout=timeout)
+                protocol.MessageId.Response, timeout=timeout)
             if response is None:
-                self._log.warning('Timeout out while waiting for message response. Attempt {t}'
+                self._log.warning('Timeout out while waiting for command response. Attempt {t}'
                                   .format(t))
             else:
-                self._handle_response(response, received_time)
-                break
+                return self._handle_response(response, received_time)
 
     def set_session(self, session_name):
-        self._send_message_and_wait("SetCurrentSession," + session_name)
+        return self._send_command_and_wait("SetCurrentSession," + session_name)
 
     def set_take(self, take_name):
-        self._send_message_and_wait("SetRecordTakeName," + take_name)
+        return self._send_command_and_wait("SetRecordTakeName," + take_name)
 
     def start_recording(self):
-        self._send_message_and_wait("StartRecording")
+        self._send_command_and_wait("LiveMode")
+        return self._send_command_and_wait("StartRecording")
 
     def stop_recording(self):
-        self._send_message_and_wait("StopRecording")
+        return self._send_command_and_wait("StopRecording")
 
     def run_once(self, timeout=None):
         """Receive and process one message."""
