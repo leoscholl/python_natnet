@@ -24,6 +24,7 @@ from .logging import Logger
 from .protocol.MocapFrameMessage import LabelledMarker
 from .protocol.ModelDefinitionsMessage import (MarkersetDescription, RigidBodyDescription,
                                                SkeletonDescription)
+from .protocol.ServerInfoMessage import ConnectionInfo
 
 __all__ = ['Client', 'Connection', 'TimestampAndLatency']
 
@@ -272,8 +273,6 @@ class ClockSynchronizer(object):
         minimum_time_between_echo_requests = 0.5
         if time_since_last_sync > 5:
             minimum_time_between_echo_requests = 0.1
-        if time_since_last_sync > 10:
-            minimum_time_between_echo_requests = 0.01
         if time_since_last_echo > minimum_time_between_echo_requests:
             self.send_echo_request(conn)
 
@@ -304,17 +303,25 @@ class TimestampAndLatency(object):
             timing_info (:class:`~protocol.MocapFrameMessage.TimingInfo`):
             clock (:class:`ClockSynchronizer`):
         """
-        timestamp = clock.server_to_local_time(timing_info.camera_mid_exposure_timestamp)
-        system_latency_ticks = timing_info.transmit_timestamp - timing_info.camera_mid_exposure_timestamp
-        system_latency = clock.server_ticks_to_seconds(system_latency_ticks)
-        transit_latency = received_timestamp - clock.server_to_local_time(timing_info.transmit_timestamp)
-        processing_latency = timeit.default_timer() - received_timestamp
-        return cls(timestamp, system_latency, transit_latency, processing_latency)
+        if timing_info.camera_mid_exposure_timestamp is not None:
+            timestamp = clock.server_to_local_time(timing_info.camera_mid_exposure_timestamp)
+            system_latency_ticks = timing_info.transmit_timestamp - timing_info.camera_mid_exposure_timestamp
+            system_latency = clock.server_ticks_to_seconds(system_latency_ticks)
+            transit_latency = received_timestamp - clock.server_to_local_time(timing_info.transmit_timestamp)
+            processing_latency = timeit.default_timer() - received_timestamp
+            return cls(timestamp, system_latency, transit_latency, processing_latency)
+        else:
+            # TODO: Figure out what to do on v2
+            timestamp = clock.server_to_local_time(timing_info.timestamp)
+            return cls(timestamp, None, None, None)
 
     @property
     def latency(self):
         """Time from camera mid-exposure to calling callback."""
-        return self.system_latency + self.transit_latency + self.processing_latency
+        if self.system_latency:
+            return self.system_latency + self.transit_latency + self.processing_latency
+        else:
+            return None
 
 
 class DiscoveryError(EnvironmentError):
@@ -341,6 +348,8 @@ class Client(object):
 
     @classmethod
     def _setup_client(cls, conn, server_info, logger):
+        protocol.set_version(server_info.natnet_version)
+
         conn.bind_data_socket(server_info.connection_info.multicast_address,
                               server_info.connection_info.data_port)
 
@@ -396,7 +405,17 @@ class Client(object):
                                                                    timeout=timeout)
         logger.debug('Server application: %s', server_info.app_name)
         logger.debug('Server version: %s', server_info.app_version)
-        assert server_info.connection_info.multicast
+        if server_info.natnet_version >= protocol.Version(3):
+            # Unicast not supported
+            assert server_info.connection_info.multicast
+        else:
+            # Before NatNet 3.0 the multicast address wasn't sent and you always had to specify it
+            # manually.  For the sake of getting this to work, let's just assume connecting to the
+            # default multicast address works.
+            ci = ConnectionInfo(data_port=1511, multicast=True, multicast_address=b'239.255.42.99')
+            logger.warning('Assuming server is in multicast mode on {}:{}'.format(
+                           ci.data_port, ci.multicast_address))
+            server_info.connection_info = ci
 
         return cls._setup_client(conn, server_info, logger)
 
@@ -420,7 +439,8 @@ class Client(object):
     def set_callback(self, callback):
         """Set the frame callback.
 
-        It will be called with a list of :class:`~natnet.protocol.MocapFrameMessage.RigidBody`, a list of
+        It will be called with a list of :class:`~natnet.protocol.MocapFrameMessage.RigidBody`, a
+        list of :class:`~natnet.protocol.MocapFrameMessage.Skeleton`, a list of
         :class:`~natnet.protocol.MocapFrameMessage.LabelledMarker`, and a :class:`~natnet.comms.TimestampAndLatency`.
         """
         self._callback = callback
@@ -492,6 +512,7 @@ class Client(object):
 
     def _handle_frame(self, frame_message, received_time):
         rigid_bodies = frame_message.rigid_bodies
+        skeletons = frame_message.skeletons
         labelled_markers = frame_message.labelled_markers
         markersets = frame_message.markersets
 
@@ -502,12 +523,11 @@ class Client(object):
 
         timestamp_and_latency = TimestampAndLatency._calculate(
             received_time, frame_message.timing_info, self._clock_synchronizer)
-        self._callback(rigid_bodies, labelled_markers, timestamp_and_latency)
+        self._callback(rigid_bodies, skeletons, labelled_markers, timestamp_and_latency)
 
         if frame_message.tracked_models_changed:
             self._log.info('Tracked models have changed, requesting new model definitions')
-            self._conn.send_packet(protocol.serialize(
-                protocol.RequestModelDefinitionsMessage()))
+            self._conn.send_message(protocol.RequestModelDefinitionsMessage())
 
     def _handle_model_definitions(self, model_definitions_message):
         """Update local list of rigid body id:name mappings.
@@ -540,6 +560,39 @@ class Client(object):
 
         self._call_model_callback()
 
+    def _handle_response(self, response_message, received_time):
+        self._log.info('Received response: ' + response_message.response)
+        if response_message.response == "":
+            return True
+        else:
+            return response_message.response
+
+    def _send_command_and_wait(self, command, timeout=0.02, tries=10):
+        self._log.info('Sending command: ' + command)
+        for t in range(tries):
+            self._conn.send_message(protocol.RequestMessage(command))
+            response, received_time = self._conn.wait_for_message_with_id(
+                protocol.MessageId.Response, timeout=timeout)
+            if response is None:
+                self._log.warning('Timeout out while waiting for command response. Attempt {t}'
+                                  .format(t))
+            else:
+                return self._handle_response(response, received_time)
+        return False
+
+    def set_session(self, session_name):
+        return self._send_command_and_wait("SetCurrentSession," + session_name)
+
+    def set_take(self, take_name):
+        return self._send_command_and_wait("SetRecordTakeName," + take_name)
+
+    def start_recording(self):
+        self._send_command_and_wait("LiveMode")
+        return self._send_command_and_wait("StartRecording")
+
+    def stop_recording(self):
+        return self._send_command_and_wait("StopRecording")
+
     def run_once(self, timeout=None):
         """Receive and process one message."""
         message_id, payload, received_time = self._conn.wait_for_packet(timeout)
@@ -556,6 +609,9 @@ class Client(object):
         elif message_id == protocol.MessageId.EchoResponse:
             echo_response_message = protocol.deserialize_payload(message_id, payload)
             self._clock_synchronizer.handle_echo_response(echo_response_message, received_time)
+        elif message_id == protocol.MessageId.Response:
+            response_message = protocol.deserialize_payload(message_id, payload)
+            self._handle_response(response_message, received_time)
         else:
             self._log.error('Unhandled message type:', message_id.name)
         self._clock_synchronizer.update(self._conn)

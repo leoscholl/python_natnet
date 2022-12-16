@@ -79,6 +79,10 @@ class ParseBuffer(object):
         """Length of remaining part of buffer."""
         return len(self.data) - self.offset
 
+    # def __repr__(self):
+    #     """Convenient string representation for debugging."""
+    #     return ' '.join('{:02x}'.format(c) for c in self.data[self.offset:])
+
     def skip(self, struct_type, n=1):
         """Skip `n` fields of the given type."""
         self.offset += struct_type.size*n
@@ -172,6 +176,14 @@ class SerDesRegistry(object):
 
         return register_message_impl
 
+    def set_version(self, version):
+        """Set the NatNet protocol version used for deserialization.
+
+        Args:
+            version (Version): New version to use
+        """
+        self._version = version
+
     @staticmethod
     def serialize(message):
         """Serialize a message instance into a binary packet.
@@ -249,6 +261,11 @@ _registry = SerDesRegistry()
 @functools.wraps(_registry.register_message)
 def register_message(*args, **kwargs):
     return _registry.register_message(*args, **kwargs)
+
+
+@functools.wraps(_registry.set_version)
+def set_version(*args, **kwargs):
+    return _registry.set_version(*args, **kwargs)
 
 
 @functools.wraps(_registry.serialize)
