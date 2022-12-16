@@ -568,6 +568,7 @@ class Client(object):
             return response_message.response
 
     def _send_command_and_wait(self, command, timeout=0.02, tries=10):
+        self._log.info('Sending command: ' + command)
         for t in range(tries):
             self._conn.send_message(protocol.RequestMessage(command))
             response, received_time = self._conn.wait_for_message_with_id(
@@ -577,6 +578,7 @@ class Client(object):
                                   .format(t))
             else:
                 return self._handle_response(response, received_time)
+        return False
 
     def set_session(self, session_name):
         return self._send_command_and_wait("SetCurrentSession," + session_name)
