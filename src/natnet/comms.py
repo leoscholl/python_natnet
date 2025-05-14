@@ -348,8 +348,15 @@ class Client(object):
 
     @classmethod
     def _setup_client(cls, conn, server_info, logger):
-        protocol.set_version(server_info.natnet_version)
 
+        try:
+            conn.send_message(protocol.RequestMessage('Bitstream,3.0.0.0'))
+            response, received_time = conn.wait_for_message_with_id(protocol.MessageId.Response, timeout=0.2)
+        except:
+            print('Updated natnet version failed')        
+        
+        protocol.set_version(server_info.natnet_version)
+        
         conn.bind_data_socket(server_info.connection_info.multicast_address,
                               server_info.connection_info.data_port)
 
@@ -392,6 +399,7 @@ class Client(object):
 
         server_address, server_info = servers[0]
         conn.set_server_address(*server_address)
+        
         return cls._setup_client(conn, server_info, logger)
 
     @classmethod
